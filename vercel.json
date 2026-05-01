@@ -1,0 +1,5 @@
+{
+  "buildCommand": "cd coinlens && npm install && npm run build",
+  "outputDirectory": "coinlens/dist",
+  "installCommand": "echo 'skip root install'"
+}
