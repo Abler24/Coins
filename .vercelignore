@@ -1,0 +1,9 @@
+backend/readings/
+backend/coins.db
+backend/chat_index.db
+.env
+.claude/
+**/__pycache__/
+**/*.pyc
+node_modules/
+coinlens/node_modules/

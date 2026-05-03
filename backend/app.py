@@ -14,25 +14,31 @@ from datetime import datetime
 
 import anthropic
 import requests
-from PIL import Image as PILImage
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from openai import OpenAI
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.platypus import (
-    Image as RLImage,
-    PageBreak,
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-)
-from reportlab.platypus.flowables import HRFlowable, KeepTogether
 from supabase import create_client, Client
+
+# PDF generation libs are large; only load if installed (not bundled on Vercel)
+try:
+    from PIL import Image as PILImage
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        Image as RLImage,
+        PageBreak,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+    )
+    from reportlab.platypus.flowables import HRFlowable, KeepTogether
+    _PDF_LIBS_AVAILABLE = True
+except ImportError:
+    _PDF_LIBS_AVAILABLE = False
 
 from readings_data import READINGS, READINGS_BY_ID, candidate_readings_for
 
@@ -1029,6 +1035,8 @@ def _safe_filename(name):
 
 @app.route("/api/groups/pdf", methods=["POST"])
 def group_pdf():
+    if not _PDF_LIBS_AVAILABLE:
+        return jsonify({"error": "PDF export is not available in this deployment."}), 503
     body = request.get_json(force=True)
     group_name = (body.get("group_name") or "Untitled Group").strip()
     coin_ids = body.get("coin_ids") or []
