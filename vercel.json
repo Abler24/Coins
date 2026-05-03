@@ -1,5 +1,17 @@
 {
   "buildCommand": "cd coinlens && npm install && npm run build",
   "outputDirectory": "coinlens/dist",
-  "installCommand": "echo 'skip root install'"
+  "installCommand": "pip install -r requirements.txt",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 60,
+      "includeFiles": "backend/*.py"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index.py"
+    }
+  ]
 }

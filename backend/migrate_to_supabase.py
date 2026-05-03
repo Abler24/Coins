@@ -1,8 +1,10 @@
 """
 One-time migration script.
-Uploads coins and chunks to Supabase in two passes:
-  Pass 1 — metadata without embeddings (fast, small payloads)
-  Pass 2 — embeddings only, 1 row at a time with retries
+Uploads coins and chunks to Supabase.
+
+  Coins pass 1  — metadata rows (no embeddings), batch upsert
+  Coins pass 2  — embeddings, concurrent individual update() calls
+  Chunks        — full rows including embeddings, small batches
 
 Run AFTER executing schema.sql in the Supabase SQL Editor.
 
@@ -15,7 +17,9 @@ import os
 import sqlite3
 import struct
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import requests as http_requests
 from dotenv import load_dotenv
 from supabase import create_client
 
@@ -26,16 +30,32 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 DB_PATH = os.path.join(os.path.dirname(__file__), "coins.db")
 CHAT_INDEX_PATH = os.path.join(os.path.dirname(__file__), "chat_index.db")
 
-META_BATCH = 100   # rows per metadata batch (no embeddings, small payload)
-EMB_BATCH = 5      # rows per embedding batch (large payload, keep small)
-CHUNK_BATCH = 10   # chunk embedding batch size
+META_BATCH = 100    # metadata rows per request (no embeddings)
+EMB_WORKERS = 3     # concurrent embedding update threads
+CHUNK_BATCH = 5     # chunk rows per request (includes embedding)
+
+REST_HEADERS = None  # set after env is loaded
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+REST_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=minimal",
+}
 
 
 def unpack_embedding(blob):
     n = len(blob) // 4
     return list(struct.unpack(f"{n}f", blob))
+
+
+def clean_text(s):
+    """Strip null bytes and other characters PostgreSQL rejects."""
+    if s is None:
+        return None
+    return s.replace("\x00", "")
 
 
 def with_retry(fn, retries=4, delay=2.0):
@@ -46,36 +66,40 @@ def with_retry(fn, retries=4, delay=2.0):
             if attempt == retries - 1:
                 raise
             wait = delay * (2 ** attempt)
-            print(f"    retrying in {wait:.0f}s ({e.__class__.__name__})")
+            print(f"    retrying in {wait:.0f}s ({e.__class__.__name__}: {e})")
             time.sleep(wait)
 
 
-def already_migrated_objectids():
-    try:
-        result = supabase.table("coins").select("objectid").execute()
-        return {r["objectid"] for r in (result.data or [])}
-    except Exception:
-        return set()
+def fetch_all_col(table, col, extra_filter=None):
+    """Paginate and return a set of all values for one column."""
+    vals = set()
+    page_size = 1000
+    offset = 0
+    while True:
+        q = supabase.table(table).select(col)
+        if extra_filter:
+            q = extra_filter(q)
+        rows = (q.range(offset, offset + page_size - 1).execute().data or [])
+        for r in rows:
+            vals.add(r[col])
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return vals
 
 
-def already_embedded_objectids():
-    """Return objectids that already have a non-null embedding."""
-    try:
-        # fetch all objectids where embedding IS NOT NULL
-        result = supabase.table("coins").select("objectid").not_("embedding", "is", "null").execute()
-        return {r["objectid"] for r in (result.data or [])}
-    except Exception:
-        return set()
-
+# ---------------------------------------------------------------------------
+# Coins
+# ---------------------------------------------------------------------------
 
 def migrate_coins():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-
     total = conn.execute("SELECT COUNT(*) FROM coins").fetchone()[0]
-    print(f"\n=== PASS 1: coin metadata ({total} rows) ===")
 
-    done_ids = already_migrated_objectids()
+    # --- Pass 1: metadata (no embedding) ---
+    print(f"\n=== COINS PASS 1: metadata ({total} rows) ===")
+    done_ids = fetch_all_col("coins", "objectid")
     print(f"  Already in Supabase: {len(done_ids)}")
 
     rows = conn.execute(
@@ -83,9 +107,7 @@ def migrate_coins():
         "artistic_merit, auction_value, collector_interest FROM coins"
     ).fetchall()
 
-    batch = []
-    inserted = 0
-
+    batch, inserted = [], 0
     for row in rows:
         if row["objectid"] in done_ids:
             continue
@@ -93,7 +115,6 @@ def migrate_coins():
         denomination = data.get("denomination") or (
             (data.get("details") or {}).get("coins", {}) or {}
         ).get("denomination")
-
         batch.append({
             "objectid": row["objectid"],
             "data": data,
@@ -115,158 +136,123 @@ def migrate_coins():
             "auction_value": row["auction_value"],
             "collector_interest": row["collector_interest"],
         })
-
         if len(batch) >= META_BATCH:
             b = batch[:]
-            with_retry(lambda: supabase.table("coins").upsert(b).execute())
+            with_retry(lambda: supabase.table("coins").upsert(b, on_conflict="objectid").execute())
             inserted += len(b)
-            print(f"  metadata {inserted}/{total - len(done_ids)}")
+            print(f"  {inserted}/{total - len(done_ids)}")
             batch = []
             time.sleep(0.05)
 
     if batch:
         b = batch[:]
-        with_retry(lambda: supabase.table("coins").upsert(b).execute())
+        with_retry(lambda: supabase.table("coins").upsert(b, on_conflict="objectid").execute())
         inserted += len(b)
-        print(f"  metadata {inserted}/{total - len(done_ids)}")
 
-    print(f"Pass 1 done. Inserted {inserted} new rows.")
+    print(f"Pass 1 done. Inserted {inserted} rows.")
 
-    # Pass 2: embeddings
-    print(f"\n=== PASS 2: coin embeddings ===")
-    embedded = already_embedded_objectids()
-    print(f"  Already embedded: {len(embedded)}")
+    # --- Pass 2: embeddings via concurrent individual UPDATE calls ---
+    print(f"\n=== COINS PASS 2: embeddings ===")
+    embedded_ids = fetch_all_col(
+        "coins", "objectid",
+        extra_filter=lambda q: q.filter("embedding", "not.is", "null"),
+    )
+    print(f"  Already embedded: {len(embedded_ids)}")
 
     emb_rows = conn.execute(
         "SELECT objectid, embedding FROM coins WHERE embedding IS NOT NULL"
     ).fetchall()
-
-    pending = [r for r in emb_rows if r["objectid"] not in embedded]
+    pending = [(r["objectid"], r["embedding"]) for r in emb_rows if r["objectid"] not in embedded_ids]
     print(f"  Pending: {len(pending)}")
 
-    batch = []
-    done = 0
-    for row in pending:
-        emb = unpack_embedding(row["embedding"])
-        batch.append({"objectid": row["objectid"], "embedding": emb})
+    done_count = [0]
+    session = http_requests.Session()
+    session.headers.update(REST_HEADERS)
 
-        if len(batch) >= EMB_BATCH:
-            b = batch[:]
-            with_retry(lambda: supabase.table("coins").upsert(b).execute())
-            done += len(b)
-            if done % 100 == 0:
-                print(f"  embeddings {done}/{len(pending)}")
-            batch = []
-            time.sleep(0.1)
+    def update_one(objectid, blob):
+        emb = unpack_embedding(blob)
+        url = f"{SUPABASE_URL}/rest/v1/coins?objectid=eq.{objectid}"
+        def do():
+            r = session.patch(url, json={"embedding": emb}, timeout=30)
+            r.raise_for_status()
+        with_retry(do)
+        done_count[0] += 1
+        if done_count[0] % 500 == 0:
+            print(f"  embeddings {done_count[0]}/{len(pending)}")
 
-    if batch:
-        b = batch[:]
-        with_retry(lambda: supabase.table("coins").upsert(b).execute())
-        done += len(b)
+    with ThreadPoolExecutor(max_workers=EMB_WORKERS) as ex:
+        futures = [ex.submit(update_one, oid, blob) for oid, blob in pending]
+        for f in as_completed(futures):
+            f.result()
 
-    print(f"Pass 2 done. Embedded {done} coins.")
+    print(f"Pass 2 done. Embedded {done_count[0]} coins.")
     conn.close()
 
 
-def already_migrated_chunk_ids():
-    try:
-        result = supabase.table("chunks").select("reading_id, page_start, page_end").execute()
-        return {(r["reading_id"], r["page_start"], r["page_end"]) for r in (result.data or [])}
-    except Exception:
-        return set()
-
+# ---------------------------------------------------------------------------
+# Chunks
+# ---------------------------------------------------------------------------
 
 def migrate_chunks():
     conn = sqlite3.connect(CHAT_INDEX_PATH)
     conn.row_factory = sqlite3.Row
-
     total = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-    print(f"\n=== PASS 1: chunk metadata ({total} rows) ===")
+    print(f"\n=== CHUNKS ({total} rows) ===")
+
+    # Build set of already-migrated (reading_id, page_start, page_end) keys
+    done_keys = set()
+    page_size = 1000
+    offset = 0
+    while True:
+        rows = (supabase.table("chunks")
+                .select("reading_id, page_start, page_end")
+                .range(offset, offset + page_size - 1)
+                .execute().data or [])
+        for r in rows:
+            done_keys.add((r["reading_id"], r["page_start"], r["page_end"]))
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    print(f"  Already in Supabase: {len(done_keys)}")
 
     rows = conn.execute(
         "SELECT reading_id, file, citation, authors, title, week, "
         "page_start, page_end, text, embedding FROM chunks"
     ).fetchall()
 
-    done_keys = already_migrated_chunk_ids()
-    print(f"  Already in Supabase: {len(done_keys)}")
-
-    # Insert metadata without embeddings first
-    batch = []
-    inserted = 0
+    batch, inserted = [], 0
     for row in rows:
         key = (row["reading_id"], row["page_start"], row["page_end"])
         if key in done_keys:
             continue
+        emb = unpack_embedding(row["embedding"]) if row["embedding"] else None
         batch.append({
             "reading_id": row["reading_id"],
-            "file": row["file"],
-            "citation": row["citation"],
-            "authors": row["authors"],
-            "title": row["title"],
+            "file": clean_text(row["file"]),
+            "citation": clean_text(row["citation"]),
+            "authors": clean_text(row["authors"]),
+            "title": clean_text(row["title"]),
             "week": row["week"],
             "page_start": row["page_start"],
             "page_end": row["page_end"],
-            "text": row["text"],
+            "text": clean_text(row["text"]),
+            "embedding": emb,
         })
-        if len(batch) >= META_BATCH:
-            b = batch[:]
-            with_retry(lambda: supabase.table("chunks").upsert(b).execute())
-            inserted += len(b)
-            print(f"  metadata {inserted}/{total - len(done_keys)}")
-            batch = []
-            time.sleep(0.05)
-
-    if batch:
-        b = batch[:]
-        with_retry(lambda: supabase.table("chunks").upsert(b).execute())
-        inserted += len(b)
-        print(f"  metadata {inserted}/{total - len(done_keys)}")
-
-    print(f"Pass 1 done. Inserted {inserted} chunk rows.")
-
-    # Pass 2: embeddings
-    print(f"\n=== PASS 2: chunk embeddings ===")
-
-    # Get chunk IDs that need embeddings
-    try:
-        result = supabase.table("chunks").select("id, reading_id, page_start, page_end").not_("embedding", "is", "null").execute()
-        already_emb = {(r["reading_id"], r["page_start"], r["page_end"]) for r in (result.data or [])}
-    except Exception:
-        already_emb = set()
-
-    print(f"  Already embedded: {len(already_emb)}")
-
-    # Fetch IDs from Supabase to match with SQLite rows
-    all_sb = supabase.table("chunks").select("id, reading_id, page_start, page_end").execute()
-    sb_id_map = {(r["reading_id"], r["page_start"], r["page_end"]): r["id"] for r in (all_sb.data or [])}
-
-    batch = []
-    done = 0
-    for row in rows:
-        key = (row["reading_id"], row["page_start"], row["page_end"])
-        if key in already_emb or key not in sb_id_map:
-            continue
-        emb = unpack_embedding(row["embedding"]) if row["embedding"] else None
-        if emb is None:
-            continue
-        batch.append({"id": sb_id_map[key], "embedding": emb})
-
         if len(batch) >= CHUNK_BATCH:
             b = batch[:]
-            with_retry(lambda: supabase.table("chunks").upsert(b).execute())
-            done += len(b)
-            if done % 100 == 0:
-                print(f"  embeddings {done}")
+            with_retry(lambda: supabase.table("chunks").insert(b).execute())
+            inserted += len(b)
+            if inserted % 100 == 0:
+                print(f"  {inserted}/{total - len(done_keys)}")
             batch = []
             time.sleep(0.1)
 
     if batch:
         b = batch[:]
-        with_retry(lambda: supabase.table("chunks").upsert(b).execute())
-        done += len(b)
+        with_retry(lambda: supabase.table("chunks").insert(b).execute())
+        inserted += len(b)
 
-    print(f"Pass 2 done. Embedded {done} chunks.")
+    print(f"Chunks done. Inserted {inserted} rows.")
     conn.close()
 
 

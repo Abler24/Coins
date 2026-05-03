@@ -474,7 +474,7 @@ def search():
         if hard_filters.get("denomination"):
             q = q.ilike("denomination", f"%{hard_filters['denomination']}%")
         if hard_filters.get("hasimage"):
-            q = q.not_("primaryimageurl", "is", "null").neq("primaryimageurl", "")
+            q = q.filter("primaryimageurl", "not.is", "null").neq("primaryimageurl", "")
         if hard_filters.get("period"):
             q = q.ilike("period", f"%{hard_filters['period']}%")
         if hard_filters.get("technique"):
@@ -660,7 +660,15 @@ READINGS_DIR = os.path.join(os.path.dirname(__file__), "readings")
 
 @app.route("/api/readings/pdf/<path:filename>", methods=["GET"])
 def serve_reading_pdf(filename):
-    return send_from_directory(READINGS_DIR, filename, as_attachment=False)
+    from flask import redirect
+    local_path = os.path.join(READINGS_DIR, filename)
+    if os.path.exists(local_path):
+        return send_from_directory(READINGS_DIR, filename, as_attachment=False)
+    # Serverless fallback: redirect to GitHub raw content
+    from urllib.parse import quote
+    safe_name = quote(filename, safe="/")
+    github_url = f"https://raw.githubusercontent.com/Abler24/Coins/main/backend/readings/{safe_name}"
+    return redirect(github_url)
 
 
 # ---------------------------------------------------------------------------
