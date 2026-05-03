@@ -70,10 +70,10 @@ def _load_culture_labels():
 
 
 # Culture list loaded lazily on first search — avoids a Supabase round-trip at cold-start
-_PARSE_PROMPT_CACHE: str | None = None
+_PARSE_PROMPT_CACHE = None  # str, set on first search call
 
 
-def _get_parse_system_prompt() -> str:
+def _get_parse_system_prompt():
     global _PARSE_PROMPT_CACHE
     if _PARSE_PROMPT_CACHE is None:
         cultures = _load_culture_labels()
