@@ -302,7 +302,11 @@ def search():
     culture_filter_applied = bool(hard_filters.get("culture"))
 
     if query and semantic_query:
-        query_embedding = embed_text(semantic_query)
+        try:
+            query_embedding = embed_text(semantic_query)
+        except Exception as e:
+            import traceback
+            return jsonify({"error": f"embedding failed: {e}", "trace": traceback.format_exc()}), 500
 
         culture_list = hard_filters.get("culture")
         if isinstance(culture_list, str):
@@ -312,19 +316,23 @@ def search():
         if isinstance(medium_list, str):
             medium_list = [medium_list]
 
-        rpc_result = supabase_client.rpc("match_coins", {
-            "query_embedding": query_embedding,
-            "filter_culture": culture_list,
-            "filter_medium": medium_list,
-            "filter_datebegin": hard_filters.get("datebegin"),
-            "filter_dateend": hard_filters.get("dateend"),
-            "filter_denomination": hard_filters.get("denomination"),
-            "filter_hasimage": hard_filters.get("hasimage", False),
-            "filter_period": hard_filters.get("period"),
-            "filter_technique": hard_filters.get("technique"),
-            "filter_mint": hard_filters.get("mint"),
-            "match_count": 80,
-        }).execute()
+        try:
+            rpc_result = supabase_client.rpc("match_coins", {
+                "query_embedding": query_embedding,
+                "filter_culture": culture_list,
+                "filter_medium": medium_list,
+                "filter_datebegin": hard_filters.get("datebegin"),
+                "filter_dateend": hard_filters.get("dateend"),
+                "filter_denomination": hard_filters.get("denomination"),
+                "filter_hasimage": hard_filters.get("hasimage", False),
+                "filter_period": hard_filters.get("period"),
+                "filter_technique": hard_filters.get("technique"),
+                "filter_mint": hard_filters.get("mint"),
+                "match_count": 80,
+            }).execute()
+        except Exception as e:
+            import traceback
+            return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
         rows = rpc_result.data or []
 
