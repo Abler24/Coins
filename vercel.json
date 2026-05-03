@@ -1,7 +1,6 @@
 {
   "buildCommand": "cd coinlens && npm install && npm run build",
   "outputDirectory": "coinlens/dist",
-  "installCommand": "pip install -r requirements.txt",
   "functions": {
     "api/index.py": {
       "maxDuration": 60,
