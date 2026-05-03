@@ -964,7 +964,9 @@ def _fetch_image_bytes(url):
         return None
 
 
-def _build_image_flowable(img_bytes, max_width=3.0 * inch):
+def _build_image_flowable(img_bytes, max_width=None):
+    if max_width is None:
+        max_width = 3.0 * inch  # only reached when reportlab is loaded
     if not img_bytes:
         return None
     try:
