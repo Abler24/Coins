@@ -501,7 +501,7 @@ def search():
             "rank": "rank",
         }
         sort_col = sort_col_map.get(sort, "rank")
-        q = q.order(sort_col, desc=(sortorder == "desc"), nulls_last=True)
+        q = q.order(sort_col, desc=(sortorder == "desc"))
 
         offset = (page - 1) * size
         q = q.range(offset, offset + size - 1)
