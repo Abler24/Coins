@@ -69,18 +69,19 @@ def _load_culture_labels():
         return []
 
 
-ALL_CULTURES = _load_culture_labels()
-CULTURE_LIST_STR = ", ".join(f"{c} ({n})" for c, n in ALL_CULTURES)
+# Culture list loaded lazily on first search — avoids a Supabase round-trip at cold-start
+_PARSE_PROMPT_CACHE: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# GPT helpers
-# ---------------------------------------------------------------------------
-
-PARSE_SYSTEM_PROMPT = f"""You are a search query parser for the Harvard Art Museums numismatic collection. This collection contains primarily ancient and medieval coins (Greek, Roman, Byzantine, Islamic, Celtic, Persian, etc.) — NOT modern, American, or commemorative coins.
+def _get_parse_system_prompt() -> str:
+    global _PARSE_PROMPT_CACHE
+    if _PARSE_PROMPT_CACHE is None:
+        cultures = _load_culture_labels()
+        culture_list_str = ", ".join(f"{c} ({n})" for c, n in cultures)
+        _PARSE_PROMPT_CACHE = f"""You are a search query parser for the Harvard Art Museums numismatic collection. This collection contains primarily ancient and medieval coins (Greek, Roman, Byzantine, Islamic, Celtic, Persian, etc.) — NOT modern, American, or commemorative coins.
 
 AVAILABLE CULTURE LABELS (exact strings in the catalog, with coin counts; you MUST pick from this list):
-{CULTURE_LIST_STR}
+{culture_list_str}
 
 Given a natural language query, extract THREE things:
 
@@ -116,6 +117,12 @@ Examples:
 - "rome" -> {{"hard_filters": {{"mint": "rome", "culture": ["Roman", "Roman Imperial", "Roman Republican", "Roman Provincial", "Graeco-Roman", "Late Roman or Byzantine"]}}, "semantic_query": "coins struck at the Rome mint, Roman denarius aureus sestertius from Rome", "score_boost": []}}
 - "athens" -> {{"hard_filters": {{"mint": "athens", "culture": ["Greek", "Hellenistic", "Graeco-Roman", "Hellenistic or Early Roman"]}}, "semantic_query": "coins struck at Athens, Athenian tetradrachm owl coinage", "score_boost": []}}
 - "zeus" -> {{"hard_filters": {{}}, "semantic_query": "coin depicting Zeus, Greek god of thunder, thunderbolt eagle seated Zeus head of Zeus", "score_boost": []}}"""
+    return _PARSE_PROMPT_CACHE
+
+
+# ---------------------------------------------------------------------------
+# GPT helpers
+# ---------------------------------------------------------------------------
 
 RERANK_SYSTEM_PROMPT = """You are a numismatics expert. Given a user's search query and a list of candidate coins, rerank them by relevance to the query.
 
@@ -193,7 +200,7 @@ def gpt_parse_query(query):
     resp = client.chat.completions.create(
         model=GPT_MODEL,
         messages=[
-            {"role": "system", "content": PARSE_SYSTEM_PROMPT},
+            {"role": "system", "content": _get_parse_system_prompt()},
             {"role": "user", "content": query},
         ],
         temperature=0.2,
