@@ -79,7 +79,7 @@ begin
         c.artistic_merit,
         c.auction_value,
         c.collector_interest,
-        1 - (c.embedding <=> query_embedding) as similarity
+        1 - (c.embedding::halfvec(3072) <=> query_embedding::halfvec(3072)) as similarity
     from coins c
     where
         (filter_culture is null or c.culture = any(filter_culture))
@@ -91,7 +91,7 @@ begin
         and (filter_period is null or lower(coalesce(c.period, '')) like '%' || lower(filter_period) || '%')
         and (filter_technique is null or lower(coalesce(c.technique, '')) like '%' || lower(filter_technique) || '%')
         and (filter_mint is null or lower(coalesce(c.title_text, '')) like '%' || lower(filter_mint) || '%')
-    order by c.embedding <=> query_embedding
+    order by c.embedding::halfvec(3072) <=> query_embedding::halfvec(3072)
     limit match_count;
 end;
 $$;
@@ -130,10 +130,10 @@ begin
         c.page_start,
         c.page_end,
         c.text,
-        1 - (c.embedding <=> query_embedding) as similarity
+        1 - (c.embedding::halfvec(3072) <=> query_embedding::halfvec(3072)) as similarity
     from chunks c
     where (filter_week is null or c.week = filter_week)
-    order by c.embedding <=> query_embedding
+    order by c.embedding::halfvec(3072) <=> query_embedding::halfvec(3072)
     limit match_count;
 end;
 $$;
@@ -191,7 +191,7 @@ as $$
     order by min(c.week), min(c.authors);
 $$;
 
--- NOTE: Run these index creation statements AFTER migration is complete.
--- They require at least a few thousand rows to build effectively.
--- create index on coins using ivfflat (embedding vector_cosine_ops) with (lists = 100);
--- create index on chunks using ivfflat (embedding vector_cosine_ops) with (lists = 10);
+-- NOTE: Run these via psql (not SQL Editor — takes too long for the UI timeout).
+-- ivfflat won't work (2000 dim limit). Use HNSW with halfvec cast instead.
+-- create index if not exists coins_embedding_hnsw_idx on coins using hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops);
+-- create index if not exists chunks_embedding_hnsw_idx on chunks using hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops);

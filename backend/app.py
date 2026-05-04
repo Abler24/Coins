@@ -247,29 +247,6 @@ def embed_text(text):
 # Routes
 # ---------------------------------------------------------------------------
 
-@app.route("/api/debug/search", methods=["GET"])
-def debug_search():
-    """Temporary: test match_coins with a zero embedding to isolate the error."""
-    import traceback
-    try:
-        zero_vec = [0.0] * 3072
-        result = supabase_client.rpc("match_coins", {
-            "query_embedding": zero_vec,
-            "filter_culture": None,
-            "filter_medium": None,
-            "filter_datebegin": None,
-            "filter_dateend": None,
-            "filter_denomination": None,
-            "filter_hasimage": False,
-            "filter_period": None,
-            "filter_technique": None,
-            "filter_mint": None,
-            "match_count": 3,
-        }).execute()
-        return jsonify({"ok": True, "count": len(result.data or []), "sample": (result.data or [])[:1]})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()})
-
 
 @app.route("/api/search", methods=["POST"])
 def search():
