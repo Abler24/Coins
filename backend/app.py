@@ -901,11 +901,15 @@ def get_coin_summary(objectid):
 
 @app.route("/api/atlas", methods=["GET"])
 def atlas():
+    # Select only dedicated extracted columns — avoids fetching ~190MB of full jsonb
     all_rows = []
     page_size = 1000
     offset = 0
     while True:
-        result = supabase_client.table("coins").select("data").range(offset, offset + page_size - 1).execute()
+        result = (supabase_client.table("coins")
+                  .select("objectid, title_text, culture, datebegin, dateend, medium, rank, primaryimageurl, denomination")
+                  .range(offset, offset + page_size - 1)
+                  .execute())
         batch = result.data or []
         all_rows.extend(batch)
         if len(batch) < page_size:
@@ -914,26 +918,18 @@ def atlas():
 
     out = []
     for r in all_rows:
-        d = r["data"]
-        if d.get("objectid") is None:
+        if r.get("objectid") is None:
             continue
-        obverse = None
-        for img in (d.get("images") or []):
-            if img.get("displayorder") == 2 and img.get("baseimageurl"):
-                obverse = img["baseimageurl"]
-                break
         out.append({
-            "objectid": d.get("objectid"),
-            "title": d.get("title"),
-            "culture": d.get("culture"),
-            "dated": d.get("dated"),
-            "datebegin": d.get("datebegin"),
-            "dateend": d.get("dateend"),
-            "medium": d.get("medium"),
-            "rank": d.get("rank"),
-            "primaryimageurl": d.get("primaryimageurl"),
-            "obverseurl": obverse,
-            "details": {"coins": {"denomination": (d.get("details") or {}).get("coins", {}).get("denomination")}},
+            "objectid": r["objectid"],
+            "title": r.get("title_text"),
+            "culture": r.get("culture"),
+            "datebegin": r.get("datebegin"),
+            "dateend": r.get("dateend"),
+            "medium": r.get("medium"),
+            "rank": r.get("rank"),
+            "primaryimageurl": r.get("primaryimageurl"),
+            "details": {"coins": {"denomination": r.get("denomination")}},
         })
     return jsonify({"coins": out, "total": len(out)})
 
