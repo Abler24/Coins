@@ -41,6 +41,47 @@ function getPageNumbers(page, totalPages) {
   return pages;
 }
 
+function applyClientFilters(coins, filters) {
+  let out = coins;
+  if (filters.cultures?.length) {
+    out = out.filter(c => filters.cultures.some(cult =>
+      (c.culture || '').toLowerCase().includes(cult.toLowerCase())
+    ));
+  }
+  if (filters.mediums?.length) {
+    out = out.filter(c => filters.mediums.some(med =>
+      (c.medium || '').toLowerCase().includes(med.toLowerCase())
+    ));
+  }
+  if (filters.denomination) {
+    const d = filters.denomination.toLowerCase();
+    out = out.filter(c => (c.details?.coins?.denomination || c.denomination || '').toLowerCase().includes(d));
+  }
+  if (filters.datebegin !== -600) {
+    out = out.filter(c => (c.dateend ?? Infinity) >= filters.datebegin);
+  }
+  if (filters.dateend !== 1900) {
+    out = out.filter(c => (c.datebegin ?? -Infinity) <= filters.dateend);
+  }
+  if (filters.hasimage) {
+    out = out.filter(c => c.primaryimageurl);
+  }
+  if (filters.period) {
+    out = out.filter(c => (c.period || '').toLowerCase().includes(filters.period.toLowerCase()));
+  }
+  if (filters.technique) {
+    out = out.filter(c => (c.technique || '').toLowerCase().includes(filters.technique.toLowerCase()));
+  }
+  if (filters.sortby && filters.sortby !== 'rank') {
+    out = [...out].sort((a, b) => {
+      const va = a[filters.sortby] ?? (filters.sortorder === 'asc' ? Infinity : -Infinity);
+      const vb = b[filters.sortby] ?? (filters.sortorder === 'asc' ? Infinity : -Infinity);
+      return filters.sortorder === 'desc' ? vb - va : va - vb;
+    });
+  }
+  return out;
+}
+
 function buildSearchParams(filters, query = '', pageNum = 1) {
   const isAI = Boolean(query);
   return {
@@ -76,8 +117,14 @@ export default function App() {
   const [hasSearched, setHasSearched] = useState(false);
   const [aiUsed, setAiUsed] = useState(false);
   const [lastQuery, setLastQuery] = useState('');
+  const [searchKey, setSearchKey] = useState(0);
 
   const { results, totalResults, loading, error, page, totalPages, search, notice, fetchCoinSummary, fetchSearchSummary, fetchRandomCoins, searchAll } = useSearch();
+
+  const displayCoins = useMemo(() => {
+    if (!aiUsed) return results;
+    return applyClientFilters(results, filters);
+  }, [aiUsed, results, filters]);
 
   const [searchSummary, setSearchSummary] = useState('');
   const [searchSummaryLoading, setSearchSummaryLoading] = useState(false);
@@ -343,22 +390,31 @@ const [selectionMode, setSelectionMode] = useState(false);
     setHasSearched(true);
   }, [filters, search]);
 
-  const handleAISearch = useCallback(async (query) => {
+  const handleAISearch = useCallback((query) => {
     setAiUsed(true);
     setLastQuery(query);
-    // Reset filters to defaults for AI search -- the backend handles filter extraction
-    const newFilters = { ...DEFAULT_FILTERS };
-    setFilters(newFilters);
-    search(buildSearchParams(newFilters, query, 1));
-    setHasSearched(true);
-    // Clear any previous summary/readings so stale content doesn't flash.
+    setSearchKey(k => k + 1);
     setSearchSummary('');
     setSearchSummaryLoading(true);
     setSearchReadings([]);
     setSearchReadingsLoading(true);
-    // Stale map data from the last search would auto-fit to the wrong region.
     setSearchMapCoins(null);
+    const newFilters = { ...DEFAULT_FILTERS };
+    setFilters(newFilters);
+    search(buildSearchParams(newFilters, query, 1));
+    setHasSearched(true);
   }, [search]);
+
+  const handleInstantApply = useCallback((newFilters) => {
+    if (aiUsed) {
+      setFilters(newFilters);
+    } else {
+      setLastQuery('');
+      search(buildSearchParams(newFilters, '', 1));
+      setHasSearched(true);
+      setSearchMapCoins(null);
+    }
+  }, [aiUsed, search]);
 
   const handleApplyFilters = useCallback(() => {
     setAiUsed(false);
@@ -371,12 +427,13 @@ const [selectionMode, setSelectionMode] = useState(false);
 
   const handleClearFilters = useCallback(() => {
     setFilters({ ...DEFAULT_FILTERS });
-    setAiUsed(false);
-    setLastQuery('');
-    setSearchMapCoins(null);
-    search(buildSearchParams(DEFAULT_FILTERS, '', 1));
-    setHasSearched(true);
-  }, [search]);
+    if (!aiUsed) {
+      setLastQuery('');
+      setSearchMapCoins(null);
+      search(buildSearchParams(DEFAULT_FILTERS, '', 1));
+      setHasSearched(true);
+    }
+  }, [aiUsed, search]);
 
   const handleRemoveFilter = useCallback((key, value) => {
     const next = { ...filters };
@@ -392,8 +449,10 @@ const [selectionMode, setSelectionMode] = useState(false);
       next[key] = '';
     }
     setFilters(next);
-    search(buildSearchParams(next, aiUsed ? lastQuery : '', 1));
-  }, [filters, search, aiUsed, lastQuery]);
+    if (!aiUsed) {
+      search(buildSearchParams(next, '', 1));
+    }
+  }, [filters, search, aiUsed]);
 
   const handlePageChange = useCallback((newPage) => {
     search(buildSearchParams(filters, aiUsed ? lastQuery : '', newPage));
@@ -466,7 +525,7 @@ const [selectionMode, setSelectionMode] = useState(false);
         <>
         <div className="browse-header">
           <h2 className="browse-header-title">Browse the Collection</h2>
-          <p className="browse-header-subtitle">Explore 3,000+ coins from the Harvard Art Museums numismatic holdings — search by keyword or filter by culture, period, medium, and denomination.</p>
+          <p className="browse-header-subtitle">Explore 19,000+ coins from the Harvard Art Museums numismatic holdings.</p>
         </div>
         <SearchBar
           onSearch={handleAISearch}
@@ -476,7 +535,7 @@ const [selectionMode, setSelectionMode] = useState(false);
         <div className="search-toolbar">
           <button
             className={`filter-toggle-btn${filtersOpen ? ' active' : ''}`}
-            onClick={() => setFiltersOpen(!filtersOpen)}
+            onClick={() => setFiltersOpen(f => !f)}
           >
             {filtersOpen ? 'Hide Filters' : 'Advanced Filters'}
           </button>
@@ -488,7 +547,13 @@ const [selectionMode, setSelectionMode] = useState(false);
             <>
               <span className="toolbar-sep" />
               <span className="toolbar-count">
-                {loading ? <>Searching<span className="loading-dots" /></> : <><span className="number">{totalResults.toLocaleString()}</span> coins</>}
+                {loading ? (
+                  <>Searching<span className="loading-dots" /></>
+                ) : aiUsed && displayCoins.length !== results.length ? (
+                  <><span className="number">{displayCoins.length}</span> of <span className="number">{results.length}</span> coins</>
+                ) : (
+                  <><span className="number">{(aiUsed ? results.length : totalResults).toLocaleString()}</span> coins</>
+                )}
               </span>
               {aiUsed && !loading && (
                 <span className="gemini-badge">
@@ -533,8 +598,10 @@ const [selectionMode, setSelectionMode] = useState(false);
             <FilterSidebar
               filters={filters}
               onFiltersChange={setFilters}
+              onAutoApply={handleInstantApply}
               onApply={handleApplyFilters}
               onClear={handleClearFilters}
+              isAiMode={aiUsed}
             />
           )}
 
@@ -695,7 +762,8 @@ const [selectionMode, setSelectionMode] = useState(false);
             )}
 
             <CoinGrid
-              coins={results}
+              key={searchKey}
+              coins={displayCoins}
               loading={loading}
               error={error}
               onCoinClick={setSelectedCoin}
@@ -703,6 +771,7 @@ const [selectionMode, setSelectionMode] = useState(false);
               selectedIds={selectedIds}
               onToggleSelect={toggleSelected}
               grouped={aiUsed}
+              isAiLoading={loading && aiUsed}
             />
 
             {hasSearched && aiUsed && !loading && (searchReadingsLoading || searchReadings.length > 0) && (

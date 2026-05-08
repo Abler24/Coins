@@ -74,13 +74,13 @@ function buildLayout(groups) {
   return layout;
 }
 
-function FullGroup({ group, onCoinClick, selectable, selectedIds, onToggleSelect }) {
+function FullGroup({ group, groupIndex, onCoinClick, selectable, selectedIds, onToggleSelect }) {
   const [expanded, setExpanded] = useState(false);
   const overflow = group.coins.length - PREVIEW_COUNT;
   const visible = expanded ? group.coins : group.coins.slice(0, PREVIEW_COUNT);
 
   return (
-    <div className="denom-group">
+    <div className="denom-group denom-group-anim" style={{ '--group-index': groupIndex }}>
       <div className="denom-group-header">
         <span className="denom-group-label">{group.label}</span>
         <span className="denom-group-count">{group.coins.length}</span>
@@ -109,9 +109,9 @@ function FullGroup({ group, onCoinClick, selectable, selectedIds, onToggleSelect
   );
 }
 
-function CompactRow({ items, onCoinClick, selectable, selectedIds, onToggleSelect }) {
+function CompactRow({ items, groupIndex, onCoinClick, selectable, selectedIds, onToggleSelect }) {
   return (
-    <div className="compact-row">
+    <div className="compact-row denom-group-anim" style={{ '--group-index': groupIndex }}>
       {items.map(({ group, span }) => (
         <div key={group.label} className={`compact-item compact-item-${span}`}>
           <div className="compact-item-header">
@@ -145,6 +145,7 @@ export default function CoinGrid({
   selectedIds,
   onToggleSelect,
   grouped = false,
+  isAiLoading = false,
 }) {
   if (error) {
     return (
@@ -157,11 +158,22 @@ export default function CoinGrid({
   }
 
   if (loading) {
+    const skeletonCount = isAiLoading ? 6 : 12;
     return (
-      <div className="coin-grid">
-        {Array.from({ length: 12 }).map((_, i) => (
-          <SkeletonCard key={i} />
-        ))}
+      <div className="ai-loading-state">
+        {isAiLoading && (
+          <div className="ai-loading-banner">
+            <div className="ai-loading-dots">
+              <span /><span /><span />
+            </div>
+            <span className="ai-loading-text">Searching the collection…</span>
+          </div>
+        )}
+        <div className="coin-grid">
+          {Array.from({ length: skeletonCount }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -189,6 +201,7 @@ export default function CoinGrid({
               <FullGroup
                 key={item.group.label}
                 group={item.group}
+                groupIndex={i}
                 onCoinClick={onCoinClick}
                 selectable={selectable}
                 selectedIds={selectedIds}
@@ -198,6 +211,7 @@ export default function CoinGrid({
               <CompactRow
                 key={i}
                 items={item.items}
+                groupIndex={i}
                 onCoinClick={onCoinClick}
                 selectable={selectable}
                 selectedIds={selectedIds}
@@ -212,15 +226,20 @@ export default function CoinGrid({
 
   return (
     <div className="coin-grid">
-      {coins.map((coin) => (
-        <CoinCard
+      {coins.map((coin, i) => (
+        <div
           key={coin.objectid || coin.id}
-          coin={coin}
-          onClick={onCoinClick}
-          selectable={selectable}
-          selected={selectable && selectedIds?.has(coin.objectid)}
-          onToggleSelect={onToggleSelect}
-        />
+          className="coin-card-anim"
+          style={{ '--card-index': Math.min(i, 11) }}
+        >
+          <CoinCard
+            coin={coin}
+            onClick={onCoinClick}
+            selectable={selectable}
+            selected={selectable && selectedIds?.has(coin.objectid)}
+            onToggleSelect={onToggleSelect}
+          />
+        </div>
       ))}
     </div>
   );

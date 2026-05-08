@@ -401,7 +401,7 @@ export default function CoinChat({ onOpenCoin } = {}) {
 
               <h3 className="chat-empty-heading">Built so it can't make things up</h3>
               <p className="chat-empty-lead">
-                Every answer is grounded in the HAA 73 readings — each claim links to the exact page. If the syllabus doesn't cover your question, it says so.
+                Every answer is based on the HAA 73 readings and each claim links to the exact page. Does not answer questions it can't answer with the readings.
               </p>
               <div className="chat-empty-trust">
                 <span className="chat-trust-pill"><span className="dot" />2,784 indexed passages</span>

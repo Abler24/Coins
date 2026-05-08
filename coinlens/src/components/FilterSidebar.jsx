@@ -33,19 +33,25 @@ function formatYear(y) {
   return `${y} CE`;
 }
 
-export default function FilterSidebar({ filters, onFiltersChange, onApply, onClear }) {
+export default function FilterSidebar({ filters, onFiltersChange, onAutoApply, onApply, onClear, isAiMode = false }) {
   const updateFilter = (key, value) => {
     onFiltersChange(prev => ({ ...prev, [key]: value }));
   };
 
   const toggleChip = (key, value) => {
-    onFiltersChange(prev => {
-      const current = prev[key] || [];
-      const next = current.includes(value)
-        ? current.filter(v => v !== value)
-        : [...current, value];
-      return { ...prev, [key]: next };
-    });
+    const current = filters[key] || [];
+    const next = current.includes(value)
+      ? current.filter(v => v !== value)
+      : [...current, value];
+    const newFilters = { ...filters, [key]: next };
+    onFiltersChange(newFilters);
+    onAutoApply?.(newFilters);
+  };
+
+  const updateAndApply = (key, value) => {
+    const newFilters = { ...filters, [key]: value };
+    onFiltersChange(newFilters);
+    onAutoApply?.(newFilters);
   };
 
   return (
@@ -90,7 +96,7 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
           type="text"
           placeholder="e.g. denarius, drachm, obol..."
           value={filters.denomination || ''}
-          onChange={e => updateFilter('denomination', e.target.value)}
+          onChange={e => isAiMode ? updateAndApply('denomination', e.target.value) : updateFilter('denomination', e.target.value)}
         />
       </div>
 
@@ -110,7 +116,7 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
               max={1900}
               step={10}
               value={filters.datebegin ?? -600}
-              onChange={e => updateFilter('datebegin', Number(e.target.value))}
+              onChange={e => isAiMode ? updateAndApply('datebegin', Number(e.target.value)) : updateFilter('datebegin', Number(e.target.value))}
               style={{ position: 'relative', width: '100%' }}
             />
           </div>
@@ -122,7 +128,7 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
               max={1900}
               step={10}
               value={filters.dateend ?? 1900}
-              onChange={e => updateFilter('dateend', Number(e.target.value))}
+              onChange={e => isAiMode ? updateAndApply('dateend', Number(e.target.value)) : updateFilter('dateend', Number(e.target.value))}
               style={{ position: 'relative', width: '100%' }}
             />
           </div>
@@ -135,7 +141,7 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
         <select
           className="filter-select"
           value={filters.period || ''}
-          onChange={e => updateFilter('period', e.target.value)}
+          onChange={e => updateAndApply('period', e.target.value)}
         >
           <option value="">All Periods</option>
           {PERIODS.filter(Boolean).map(p => (
@@ -150,7 +156,7 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
         <select
           className="filter-select"
           value={filters.technique || ''}
-          onChange={e => updateFilter('technique', e.target.value)}
+          onChange={e => updateAndApply('technique', e.target.value)}
         >
           <option value="">All Techniques</option>
           {TECHNIQUES.filter(Boolean).map(t => (
@@ -164,7 +170,7 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
         <label className="filter-label">Image Availability</label>
         <div
           className="toggle-switch"
-          onClick={() => updateFilter('hasimage', !filters.hasimage)}
+          onClick={() => updateAndApply('hasimage', !filters.hasimage)}
         >
           <div className={`toggle-track ${filters.hasimage ? 'active' : ''}`}>
             <div className="toggle-thumb" />
@@ -181,7 +187,9 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
           value={`${filters.sortby || 'rank'}|${filters.sortorder || 'asc'}`}
           onChange={e => {
             const [sortby, sortorder] = e.target.value.split('|');
-            onFiltersChange(prev => ({ ...prev, sortby, sortorder }));
+            const newFilters = { ...filters, sortby, sortorder };
+            onFiltersChange(newFilters);
+            onAutoApply?.(newFilters);
           }}
         >
           {SORT_OPTIONS.map(o => (
@@ -196,7 +204,7 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
         <select
           className="filter-select"
           value={filters.size || 12}
-          onChange={e => updateFilter('size', Number(e.target.value))}
+          onChange={e => updateAndApply('size', Number(e.target.value))}
         >
           {SIZE_OPTIONS.map(s => (
             <option key={s} value={s}>{s}</option>
@@ -204,11 +212,13 @@ export default function FilterSidebar({ filters, onFiltersChange, onApply, onCle
         </select>
       </div>
 
-      {/* Actions */}
+      {/* Actions — only needed for date range and denomination in filter mode */}
       <div className="filter-actions">
-        <button className="filter-apply-btn" onClick={onApply}>
-          Apply Filters
-        </button>
+        {!isAiMode && (
+          <button className="filter-apply-btn" onClick={onApply}>
+            Apply Filters
+          </button>
+        )}
         <button className="filter-clear-btn" onClick={onClear}>
           Clear
         </button>
