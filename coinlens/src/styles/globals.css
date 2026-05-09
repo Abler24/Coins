@@ -2555,10 +2555,24 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* Responsive tweaks */
 @media (max-width: 720px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
   .header-actions {
     position: static;
-    justify-content: center;
-    margin-bottom: 10px;
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-bottom: 2px;
+  }
+  .chat-shell {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .chat-sources-panel {
+    display: none;
   }
   .groups-layout {
     grid-template-columns: 1fr;
@@ -4234,6 +4248,100 @@ input[type="range"]::-webkit-slider-thumb {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* ═══════ MOBILE ═══════ */
+
+@media (max-width: 640px) {
+  /* Chat: tighter padding throughout */
+  .chat-transcript {
+    padding: 16px 16px 10px;
+  }
+  .chat-composer {
+    padding: 10px 14px 8px;
+  }
+  .chat-disclaimer {
+    padding: 0 14px 10px;
+  }
+  .chat-header {
+    padding: 10px 16px 10px;
+  }
+  .chat-shell {
+    height: calc(100vh - 80px);
+    min-height: 400px;
+  }
+
+  /* Chat suggestions: single column on small screens */
+  .chat-suggestions {
+    grid-template-columns: 1fr;
+  }
+
+  /* Browse header: tighter padding */
+  .browse-header {
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+
+  /* Modal: bottom sheet on mobile */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .modal-content {
+    max-width: 100%;
+    max-height: 96vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  /* Atlas: full-screen bottom sheet */
+  .atlas-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .atlas-modal {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-height: 95vh;
+    overflow-y: auto;
+  }
+
+  /* Selection actions: allow wrapping */
+  .selection-actions {
+    flex-wrap: wrap;
+  }
+
+  /* Pagination: compact */
+  .pagination {
+    gap: 6px;
+    padding-bottom: 32px;
+  }
+  .page-btn {
+    padding: 8px 12px;
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Hide subtitle on very small phones to prevent overflow */
+  .app-subtitle {
+    display: none;
+  }
+
+  /* Smaller header buttons */
+  .groups-btn {
+    font-size: 11px;
+    padding: 7px 10px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Search bar: hide prefix label to save space */
+  .search-prefix {
+    display: none;
+  }
+
+  /* Toolbar: hide AI badge on small screens */
+  .gemini-badge {
+    display: none;
   }
 }
 
