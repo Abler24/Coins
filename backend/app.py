@@ -686,9 +686,9 @@ def serve_reading_pdf(filename):
     if os.path.exists(local_path):
         return send_from_directory(READINGS_DIR, filename, as_attachment=False)
     # Serverless: proxy from GitHub so browser gets application/pdf, not octet-stream
-    from urllib.parse import quote
+    from urllib.parse import quote, unquote
     from flask import Response
-    safe_name = quote(filename, safe="/")
+    safe_name = quote(unquote(filename), safe="/")
     github_url = f"https://raw.githubusercontent.com/Abler24/Coins/main/backend/readings/{safe_name}"
     try:
         r = requests.get(github_url, timeout=30)
